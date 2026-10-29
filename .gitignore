@@ -1,0 +1,4 @@
+/target
+
+# Local PDFium runtime library (download separately)
+.pdfium/

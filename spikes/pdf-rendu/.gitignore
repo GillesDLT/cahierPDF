@@ -1,0 +1,4 @@
+/target
+# bibliothèque PDFium téléchargée localement (voir docs/mesures.md)
+/.pdfium
+/sorties

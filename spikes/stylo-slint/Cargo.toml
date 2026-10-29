@@ -1,0 +1,11 @@
+[package]
+name = "stylo-slint"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Spike jetable de J0 (cf. ../../AGENTS.md : les spikes vivent dans spikes/).
+# T0 : aucune dépendance hors `slint` (pas de stylet, pas de PDF).
+[dependencies]
+slint = "1"

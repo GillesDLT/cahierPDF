@@ -1,0 +1,234 @@
+// cahierPDF — J2 : fenêtre principale, vue de page et panneau de miniatures.
+//
+// F-03 : « Ouvrir » (champ de chemin) + glisser-déposer (DropArea) ;
+// F-04 : « Insérer » avant/après la page courante ;
+// F-05 : « Page blanche » ; F-06 : « Dupliquer » ; F-07 : « Supprimer » ;
+// F-08 : réordonner les miniatures par glisser-déposer (ou ↑/↓) ;
+// F-09 : panneau de miniatures navigable (clic = aller à la page).
+//
+// Note F-03 : le backend winit de Slint 1.18.1 ne relaie pas les dépôts de
+// fichiers de l'OS (vérifié dans le source figé) ; le DropArea ci-dessous
+// recevra les dépôts dès que le backend les relaiera.
+
+import { Button, LineEdit, CheckBox, ListView } from "std-widgets.slint";
+
+export struct PageThumb {
+    label: string,
+    thumb: image,
+    has-pdf: bool,
+    landscape: bool,
+}
+
+export component MainWindow inherits Window {
+    title: "cahierPDF";
+    preferred-width: 1280px;
+    preferred-height: 820px;
+    background: #22262e;
+    default-font-size: 13px;
+
+    // État du document, mis à jour par Rust.
+    in-out property <[PageThumb]> pages;
+    in-out property <int> current-page: 0;
+    in-out property <bool> current-landscape: false;
+    in-out property <float> page-w-px: 420.0;
+    in-out property <float> page-h-px: 594.0;
+    in-out property <image> page-image;
+    in-out property <float> page-img-x-px: 0.0;
+    in-out property <float> page-img-y-px: 0.0;
+    in-out property <bool> can-undo: false;
+    in-out property <bool> can-redo: false;
+    in-out property <string> status: "Prêt.";
+
+    // État du glisser-déposer des miniatures (F-08).
+    property <int> drag-from: -1;
+    property <int> drag-to: -1;
+    property <length> drag-start-y: 0px;
+    property <bool> drag-moved: false;
+
+    // Actions utilisateur, traitées par Rust.
+    callback open-pdf(string);            // F-03 : Ouvrir (remplace le document)
+    callback insert-pdf(string, bool);    // F-04 : insérer avant/après la page courante
+    callback add-blank-page(bool);        // F-05
+    callback duplicate-page();            // F-06
+    callback delete-page();               // F-07
+    callback move-page(int, int);         // F-08
+    callback goto-page(int);              // F-09
+    callback undo();
+    callback redo();
+    callback file-dropped(data-transfer); // F-03 : glisser-déposer
+
+    DropArea {
+        can-drop(event) => { DragAction.copy }
+        dropped(event) => {
+            root.file-dropped(event.data);
+            return event.proposed-action;
+        }
+
+        VerticalLayout {
+            spacing: 6px;
+            padding: 8px;
+
+            // Barre d'outils
+            HorizontalLayout {
+                spacing: 6px;
+                height: 36px;
+                path-input := LineEdit {
+                    width: 250px;
+                    placeholder-text: "chemin vers un PDF";
+                }
+                Button { text: "Ouvrir"; clicked => { root.open-pdf(path-input.text); } }
+                Button { text: "Insérer"; clicked => { root.insert-pdf(path-input.text, after-check.checked); } }
+                after-check := CheckBox {
+                    text: "après la page courante";
+                    checked: true;
+                }
+                Button { text: "Page blanche"; clicked => { root.add-blank-page(after-check.checked); } }
+                Button { text: "Dupliquer"; clicked => { root.duplicate-page(); } }
+                Button { text: "Supprimer"; clicked => { root.delete-page(); } }
+                Button {
+                    text: "↑";
+                    width: 34px;
+                    clicked => {
+                        if (root.current-page > 0) {
+                            root.move-page(root.current-page, root.current-page - 1);
+                        }
+                    }
+                }
+                Button {
+                    text: "↓";
+                    width: 34px;
+                    clicked => {
+                        root.move-page(root.current-page, root.current-page + 1);
+                    }
+                }
+                Button { text: "Annuler"; enabled: root.can-undo; clicked => { root.undo(); } }
+                Button { text: "Rétablir"; enabled: root.can-redo; clicked => { root.redo(); } }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                // Panneau de miniatures (F-08, F-09)
+                Rectangle {
+                    width: 180px;
+                    background: #2b313c;
+                    border-radius: 6px;
+                    ListView {
+                        for thumb[i] in root.pages : Rectangle {
+                            height: 148px;
+                            width: 100%;
+                            background: touch.pressed ? #3a4252 : transparent;
+                            border-radius: 4px;
+
+                            // Marqueur de dépôt pendant le glisser (F-08).
+                            Rectangle {
+                                visible: root.drag-from >= 0 && root.drag-to == i && root.drag-to != root.drag-from;
+                                y: parent.height - 2px;
+                                height: 2px;
+                                background: #4c8dff;
+                            }
+
+                            touch := TouchArea {
+                                pointer-event(event) => {
+                                    if (event.kind == PointerEventKind.down) {
+                                        root.drag-from = i;
+                                        root.drag-to = i;
+                                        root.drag-start-y = touch.mouse-y;
+                                        root.drag-moved = false;
+                                    } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                                        if (root.drag-from == i && root.drag-moved && root.drag-to != root.drag-from) {
+                                            root.move-page(root.drag-from, root.drag-to);
+                                        }
+                                        root.drag-from = -1;
+                                        root.drag-to = -1;
+                                    }
+                                }
+                                moved => {
+                                    if (root.drag-from == i) {
+                                        if (touch.mouse-y - root.drag-start-y > 4px || touch.mouse-y - root.drag-start-y < -4px) {
+                                            root.drag-moved = true;
+                                        }
+                                        root.drag-to = clamp(
+                                            root.drag-from + round((touch.mouse-y - root.drag-start-y) / 148px),
+                                            0,
+                                            root.pages.length - 1);
+                                    }
+                                }
+                                clicked => {
+                                    if (!root.drag-moved) {
+                                        root.goto-page(i);
+                                    }
+                                }
+                            }
+
+                            // Carte miniature, ratio A4.
+                            Rectangle {
+                                x: (parent.width - self.width) / 2;
+                                y: 8px;
+                                width: thumb.landscape ? 130px : 92px;
+                                height: thumb.landscape ? 92px : 130px;
+                                background: white;
+                                border-radius: 2px;
+                                border-width: i == root.current-page ? 2px : 1px;
+                                border-color: i == root.current-page ? #4c8dff : #00000030;
+                                Image {
+                                    x: 2px;
+                                    y: 2px;
+                                    width: parent.width - 4px;
+                                    height: parent.height - 4px;
+                                    source: thumb.thumb;
+                                    image-fit: contain;
+                                }
+                            }
+                            Text {
+                                y: 140px;
+                                width: 100%;
+                                horizontal-alignment: center;
+                                text: thumb.label + (thumb.has-pdf ? " · PDF" : "");
+                                color: #c8ccd4;
+                                font-size: 11px;
+                            }
+                        }
+                    }
+                }
+
+                // Vue de la page courante (F-10 : fond ajusté, centré).
+                Rectangle {
+                    background: #2b313c;
+                    border-radius: 6px;
+                    Rectangle {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: root.page-w-px * 1px;
+                        height: root.page-h-px * 1px;
+                        background: white;
+                        drop-shadow-blur: 14px;
+                        drop-shadow-color: #00000050;
+                        Image {
+                            x: root.page-img-x-px * 1px;
+                            y: root.page-img-y-px * 1px;
+                            source: root.page-image;
+                            image-fit: fill;
+                        }
+                    }
+                }
+            }
+
+            // Barre d'état
+            HorizontalLayout {
+                height: 24px;
+                Text {
+                    text: root.status;
+                    color: #9aa2b1;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: "page " + (root.current-page + 1) + " / " + root.pages.length;
+                    color: #9aa2b1;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,22 @@
+[package]
+name = "cahierpdf"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+description = "Prise de notes au stylet sur pages A4, avec import/annotation/export de PDF"
+
+# Jalon J2 — Pages : `model/` (J1, terminé) et `pdf/` (import PDFium).
+# Le binaire `ui/` (Slint) vient dans le même jalon ; render/ et io/ plus tard.
+
+[dependencies]
+# Erreurs typées (AGENTS.md).
+thiserror = "2"
+# Import PDF (F-03/F-04), choix acté par AGENTS.md et mesuré en J0 (T2).
+# Charge PDFium à l'exécution, jamais à la compilation.
+pdfium-render = "0.9.4"
+# Interface graphique (AGENTS.md) : version figée par le spike T0.
+slint = "1.18.1"
+
+[build-dependencies]
+slint-build = "1.18.1"
